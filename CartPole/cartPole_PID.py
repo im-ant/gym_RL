@@ -1,13 +1,11 @@
 # ==============================================================================
-# Gym page: https://gym.openai.com/envs/CartPole-v1/#barto83
-# Tutorial: https://medium.com/@tuzzer/cart-pole-balancing-with-q-learning-b54c6068d947
-# Docs on environment: https://github.com/openai/gym/wiki/CartPole-v0
-# Additional resource on tutorial:
-#   https://medium.freecodecamp.org/diving-deeper-into-reinforcement-learning-with-q-learning-c18d0db58efe
+# Un-actuated pole balancing on cart, with control being force applied to cart
 #
+# Gym page: https://gym.openai.com/envs/CartPole-v1/#barto83
+# Docs on environment: https://github.com/openai/gym/wiki/CartPole-v0
 # ==============================================================================
 import sys, random, math
-import numpy as np
+#import numpy as np
 import gym
 
 #Construct the pole-balancing environment
@@ -19,9 +17,9 @@ N_EPS = 1
 N_TIMESTEP = 1000
 
 
-
-# Compute how much cart velocity we should have
+# Use PD control to find the desired cart velocity given angle
 def PD_control(theta, dTheta):
+    # Constants
     k_P = 10.0
     k_D = 8.0
 
@@ -30,7 +28,7 @@ def PD_control(theta, dTheta):
     return wantedCarV
 
 
-# Select the optimal action from the q table
+# Bang-bang control based on current and desired cart velocity
 def getAction(curV, goalV):
     if (goalV > curV):
         return 1
@@ -40,6 +38,7 @@ def getAction(curV, goalV):
 
     if (goalV == curV):
         return None
+
 
 
 # Simulate function
@@ -57,22 +56,23 @@ def simulate(env):
             # Unpack the observations
             carPos, carV, theta, thetaV = observation
 
-            # Compute the
+            # Compute the desired cart velocity
             goal_carV = PD_control(theta, thetaV)
 
-
-            #Select action
+            # Select action
             action = getAction(carV, goal_carV)
             if action == None:
                 continue
 
-            #Compute next timestep
+            # Compute states for next timestep
             observation, reward, done, info = env.step(action)
 
+            # Count rewards
             rewardAgg += reward # Count the rewards
 
 
             if done:
+                continue
                 print("Episode finished after {} timesteps".format(t+1))
                 break
 
