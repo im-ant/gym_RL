@@ -43,6 +43,8 @@ class CircularReplayBuffer(object):
         self._act_dtype = torch.int32
         self._rew_dtype = torch.float32
 
+        # TODO: should change this to have shape (1, 84, 84)
+
         # Initialize the experience buffers
         obs_buffer_shape = ((self.capacity,) + self._obs_shape)
         self._obs_buffer = torch.empty(obs_buffer_shape, dtype=self._obs_dtype,
