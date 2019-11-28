@@ -57,8 +57,7 @@ def run_environment(args: argparse.Namespace, device: str = 'cpu',
 
     # =====================================================
     # Initialize environment and pre-processing
-    # TODO: ensure random seed is set for both the agent and the environment
-    
+
     screen_size = 84
     raw_env = gym.make(args.env_name)
 
@@ -218,6 +217,3 @@ if __name__ == "__main__":
     # Start environmental interactions
     run_environment(args, device=device, logger=logger)
 
-"""TODO
-- write wrapper and run jobs
-"""
