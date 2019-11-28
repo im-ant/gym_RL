@@ -14,7 +14,10 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+import torch.nn as nn
 import torch.optim as optim
+
 
 import network
 import replay_memory
@@ -23,31 +26,18 @@ import replay_memory
 def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon_final):
     """
     TODO: organize stuff here and add start epsilon argument
+    Code is copied largely directly from the Google Dopamine code
 
     :param decay_period: float, the period over which epsilon is decayed.
     :param step: int, the number of training steps completed so far.
-    :param warmup_steps:
-    :param epsilon:
-    :return:
-    """
-    """Returns the current epsilon for the agent's epsilon-greedy policy.
-    This follows the Nature DQN schedule of a linearly decaying epsilon (Mnih et
-    al., 2015). The schedule is as follows:
-    Begin at 1. until warmup_steps steps have been taken; then
-    Linearly decay epsilon from 1. to epsilon in decay_period steps; and then
-    Use epsilon from there on.
-    Args:
-    decay_period: 
-    step: 
-    warmup_steps: int, the number of steps taken before epsilon is decayed.
-    epsilon_final: float, the final value to which to decay the epsilon parameter.
-    Returns:
-    A float, the current epsilon value computed according to the schedule.
+    :param warmup_steps: number of steps taken before epsilon is decayed
+    :param epsilon: the final epsilon value
+    :return: current epsilon value
     """
     steps_left = decay_period + warmup_steps - step
     bonus = (1.0 - epsilon_final) * steps_left / decay_period
     bonus = np.clip(bonus, 0., 1. - epsilon_final)
-    return epsilon + bonus
+    return epsilon_final + bonus
 
 
 class DQNAgent(object):
@@ -67,7 +57,7 @@ class DQNAgent(object):
                  epsilon_start: float = 1.0,
                  epsilon_final: float = 0.1,
                  epsilon_decay_period: int = 250000,
-                 memory_buffer_size: int = 1000000,
+                 memory_buffer_capacity: int = 1000000,
                  minibatch_size: int = 32,
                  device: str = 'cpu',
                  summary_writer=None):
@@ -86,13 +76,12 @@ class DQNAgent(object):
         :param min_replay_history: number of transitions that should be
             experienced before the agent begins training its value function
         :param update_period: int, number of actions between network training
-        :param target_update_period: update period of target network (per
-            parameter updates)
+        :param target_update_period: update period of target network (per action)
         :param epsilon_fn: epsilon decay function
         :param epsilon_start: exploration rate at start
         :param epsilon_final: final exploration rate
         :param epsilon_decay_period: length of the epsilon decay schedule
-        :param memory_buffer_size: size of the memory buffer for replay
+        :param memory_buffer_capacity: total capacity of the memory buffer for replay
         :param device: 'cuda' or 'cpu', depending on if 'cuda' is available
         :param summary_writer: TODO implement this with TensorBoard in the future
         """
@@ -112,16 +101,12 @@ class DQNAgent(object):
         self.epsilon_decay_period = epsilon_decay_period
         self.summary_writer = summary_writer  # TODO: implement this
 
-        self.memory_buffer_size = memory_buffer_size
+        self.memory_buffer_capacity = memory_buffer_capacity
         self.minibatch_size = minibatch_size
         self.device = device
 
         # Additional attributes
         memory_buffer_device = self.device  # store buffer in GPU ram
-
-        # Counter attributes
-        self.training_steps = 0  # for epsilon decay
-        self.total_param_updates = 0
 
         # Initialize network, memory and optimizer
         self.policy_net = None
@@ -142,21 +127,28 @@ class DQNAgent(object):
         # History queue: for stacking observations (np matrices in cpu)
         self.history_queue = deque(maxlen=self.history_size)
 
+        # Counter attributes
+        self.training_steps = 0  # for epsilon decay
+        self.episode_total_policy_loss = 0.0
+        self.episode_total_optim_steps = 0
+
     def _init_network(self) -> None:
         """Initialize the Q network"""
         self.policy_net = network.nature_dqn_network(self.num_actions,
                                                      self.history_size,
-                                                     self.observation_shape[-2:])
+                                                     self.observation_shape[-2:]
+                                                     ).to(self.device)
         self.target_net = network.nature_dqn_network(self.num_actions,
                                                      self.history_size,
-                                                     self.observation_shape[-2:])
+                                                     self.observation_shape[-2:]
+                                                     ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()  # set target net to evaluation mode
 
     def _init_memory(self) -> None:
         """Initialize the memory buffer"""
         self.memory = replay_memory.CircularReplayBuffer(
-            buffer_cap=self.memory_buffer_size,
+            buffer_cap=self.memory_buffer_capacity,
             history=self.history_size,
             obs_shape=self.observation_shape,
             device=self.device)
@@ -171,6 +163,10 @@ class DQNAgent(object):
                                        dtype=self.observation_dtype,
                                        device='cpu')
             self.history_queue.append(zero_pad_mat)
+
+        # clear per-episode counters
+        self.episode_total_policy_loss = 0.0
+        self.episode_total_optim_steps = 0
 
         # NOTE: first observation is not stored in memory buffer
         # TODO: maybe add training step?
@@ -188,6 +184,7 @@ class DQNAgent(object):
                                    device='cpu')
         self.history_queue.append(observation)
 
+        self._train_step()
         # Select action and return int
         return self._select_action()
 
@@ -213,6 +210,26 @@ class DQNAgent(object):
             action_tensor = self.policy_net(state).max(1)[1].view(1, 1)
             return action_tensor.item()  # TODO ensure this works
 
+    def _train_step(self):
+        """Runs a single training step.
+        Runs a training op if both:
+          (1) A minimum number of frames have been added to the replay buffer.
+          (2) `training_steps` is a multiple of `update_period`.
+        Also, syncs weights from online to target network if training steps is a
+        multiple of target update period.
+        """
+        # Run a train op at the rate of self.update_period if enough training steps
+        # have been run. This matches the Nature DQN behaviour.
+        if len(self.memory) > self.min_replay_history:
+            if self.training_steps % self.update_period == 0:
+                self._optimize_model()
+                # TODO: Dopamine had a bunch of summary writers here
+            # Update target network
+            if self.training_steps % self.target_update_period == 0:
+                self.target_net.load_state_dict(self.policy_net.state_dict())
+
+        self.training_steps += 1
+
     def _history_queue_to_state(self) -> torch.tensor:
         """
         Convert the current history queue into a torch tensor state, where the
@@ -237,18 +254,18 @@ class DQNAgent(object):
         """
 
         # Cast all to tensor
-        action = torch.tensor([action], dtype=torch.int32, device=device)
+        action = torch.tensor([action], dtype=torch.int32, device=self.device)
         observation = torch.tensor(observation, dtype=self.observation_dtype,
-                                   device=device)
-        reward = torch.tensor([reward], dtype=torch.float32, device=device)
+                                   device=self.device)
+        reward = torch.tensor([reward], dtype=torch.float32, device=self.device)
         is_terminal = torch.tensor([is_terminal], dtype=torch.bool,
-                                   device=device)
+                                   device=self.device)
 
         # TODO: reward clipping not done here, do in environment
         # Push to memory
         self.memory.push(observation, action, reward, is_terminal)
 
-    def optimize_model(self) -> float:
+    def _optimize_model(self) -> float:
         """
         Optimizes the model for
         :return:
@@ -276,22 +293,16 @@ class DQNAgent(object):
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
 
         # Optimization
-        optimizer.zero_grad()
+        self.optimizer.zero_grad()
         loss.backward()
         for param in self.policy_net.parameters():  # gradient-clipping
             param.grad.data.clamp_(-1, 1)
-        optimizer.step()
+        self.optimizer.step()
 
-        self.total_param_updates += 1
-        # Update policy net
-        if self.total_param_updates % self.target_update_period == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
-
-        # Return loss
-        if loss is not None:
-            return loss
-        else:
-            return -1.0
+        # Log the loss
+        if loss is not None:  # TODO: should never come to this?
+            self.episode_total_policy_loss += loss.item()
+        self.episode_total_optim_steps += 1
 
 
 if __name__ == "__main__":

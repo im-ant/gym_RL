@@ -52,7 +52,7 @@ class AtariPreprocessing(object):
     """
 
     def __init__(self, environment, frame_skip=4, terminal_on_life_loss=False,
-               screen_size=84):
+                 screen_size=84):
         """Constructor for an Atari 2600 preprocessor.
 
         Args:
@@ -91,8 +91,10 @@ class AtariPreprocessing(object):
     def observation_space(self):
         # Return the observation space adjusted to match the shape of the processed
         # observations.
-        return Box(low=0, high=255, shape=(self.screen_size, self.screen_size, 1),
-                   dtype=np.uint8)
+        # return Box(low=0, high=255, shape=(self.screen_size, self.screen_size, 1),
+        #           dtype=np.uint8)  # (previous Google code)
+        return Box(low=0, high=255, shape=(1, self.screen_size, self.screen_size),
+                   dtype=np.uint8)  # (Anthony) Makes screen [1, 84, 84]
 
     def action_space(self):
         return self.environment.action_space
@@ -216,4 +218,6 @@ class AtariPreprocessing(object):
                                        (self.screen_size, self.screen_size),
                                        interpolation=cv2.INTER_AREA)
         int_image = np.asarray(transformed_image, dtype=np.uint8)
-        return np.expand_dims(int_image, axis=2)
+
+        # return np.expand_dims(int_image, axis=2)  # Original code
+        return np.expand_dims(int_image, axis=0)  # (Anthony) makes screen [1, 84, 84]

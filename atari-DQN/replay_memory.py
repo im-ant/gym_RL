@@ -28,8 +28,22 @@ class CircularReplayBuffer(object):
     frame size and 1mil frames should take around 7.1 GB to store
     """
 
-    def __init__(self, buffer_cap=50000, history=4, obs_shape=(84, 84),
+    def __init__(self, buffer_cap=50000, history=4, obs_shape=(1, 84, 84),
                  device='cpu') -> None:
+        """
+        Initializing the circular replay buffer. For the atari setting, the
+        internal buffer should have shapes:
+            _obs_buffer : (capacity, c, 84, 84)
+            _act_buffer : (capacity, 1)
+            _rew_buffer : (capacity, 1)
+            _done_buffer: (capacity, 1)
+
+        :param buffer_cap: total capacity of the buffer
+        :param history: number of observation to stack to make a state
+        :param obs_shape: shape of observation tensor
+        :param device: device to store memory on
+        """
+
         # Initialize counter
         self._cur_idx = 0  # Current buffer index to write to
         self.size = 0  # Number of experiences stored
@@ -42,8 +56,6 @@ class CircularReplayBuffer(object):
         self._obs_dtype = torch.uint8
         self._act_dtype = torch.int32
         self._rew_dtype = torch.float32
-
-        # TODO: should change this to have shape (1, 84, 84)
 
         # Initialize the experience buffers
         obs_buffer_shape = ((self.capacity,) + self._obs_shape)
@@ -99,13 +111,15 @@ class CircularReplayBuffer(object):
         :return: minibatches of state and successor states
         """
 
-        # Initialize current and next states
-        cur_states = torch.zeros(((len(idxs), self.history) + self._obs_shape),
+        # Initialize current and next states tensors (pre zero-padded)
+        _state_tensor_shape = ((len(idxs), self.history) + self._obs_shape[-2:])
+        cur_states = torch.zeros(_state_tensor_shape,
                                  dtype=self._obs_dtype,
                                  device=self._device)
-        nex_states = torch.zeros(((len(idxs), self.history) + self._obs_shape),
+        nex_states = torch.zeros(_state_tensor_shape,
                                  dtype=self._obs_dtype,
                                  device=self._device)
+
         # Fill each state
         for i, buf_idx in enumerate(idxs):
             # Get the valid obs sequence of length history + 1
@@ -115,12 +129,19 @@ class CircularReplayBuffer(object):
                 else seq_idxs
 
             # Fill states
+            # NOTE reshaping stacks multiple channels (if present) AND frames
+            #      into the 2nd dimension of the returned state tensor
             if len(cur_seq_idxs) > 0:
-                cur_states[i, -len(cur_seq_idxs):] = \
-                    self._obs_buffer[cur_seq_idxs]
+                cur_states[i, -len(cur_seq_idxs):] = torch.reshape(
+                    self._obs_buffer[cur_seq_idxs],
+                    (-1, self._obs_shape[-1], self._obs_shape[-1])
+                )
+
             if len(nex_seq_idxs) > 0:
-                nex_states[i, -len(nex_seq_idxs):] = \
-                    self._obs_buffer[nex_seq_idxs]
+                nex_states[i, -len(nex_seq_idxs):] = torch.reshape(
+                    self._obs_buffer[nex_seq_idxs],
+                    (-1, self._obs_shape[-1], self._obs_shape[-1])
+                )
 
         return cur_states, nex_states
 
