@@ -18,15 +18,15 @@ EXP_LOG_PATH=$logpath
 TMP_DIR_PATH="$SLURM_TMPDIR"
 
 # Training variables
-ENV_NAME=$vari
-N_EPISODES="100000"  # Episodes to run
+ENV_NAME="Breakout-v0" # alternatively $vari
+N_EPISODES="1000000"  # Episodes to run
 FRAME_SKIPS="4"  # the agent only sees every k frames
 HISTORY_SIZE="4"  # how many observations to stack for a state
 
 UPDATE_PERIOD="4" # number of action between succcessive SGD updates
 TARGET_UPDATE_PERIOD="10000"  # num of actions between target network update
 
-BUFFER_CAPACITY="1000000" # Buffer capacity (experiences)
+BUFFER_CAPACITY=$vari #"1000000" # Buffer capacity (experiences)
 DISCOUNT_FACTOR="0.99"
 MINIBATCH_SIZE="32"
 

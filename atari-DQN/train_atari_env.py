@@ -94,6 +94,7 @@ def run_environment(args: argparse.Namespace, device: str = 'cpu',
                                minibatch_size=args.minibatch_size,
                                device=device,
                                summary_writer=None)  # TODO implement summary writer
+    # TODO: implement memory buffer location
 
     # =====================================================
     # Start interacting with environment
