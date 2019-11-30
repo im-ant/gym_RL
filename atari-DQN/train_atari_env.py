@@ -71,7 +71,7 @@ def run_environment(args: argparse.Namespace, device: str = 'cpu',
 
     environment = atari_lib.AtariPreprocessing(raw_env,
                                                frame_skip=args.frame_skips,
-                                               terminal_on_life_loss=False,
+                                               terminal_on_life_loss=True,
                                                screen_size=screen_size)
 
     num_actions = environment.action_space().n
@@ -148,7 +148,7 @@ def run_environment(args: argparse.Namespace, device: str = 'cpu',
 if __name__ == "__main__":
 
     # TODO: have a hyperparmeter .config file for the future
-    
+
     # =====================================================
     # Initialize the argument parser
     parser = argparse.ArgumentParser(description='DQN for atari environment')
