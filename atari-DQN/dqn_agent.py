@@ -120,7 +120,7 @@ class DQNAgent(object):
         self.optimizer = optim.RMSprop(self.policy_net.parameters(),
                                        lr=0.00025,
                                        alpha=0.95,
-                                       momentum=0.0,  # TODO: 0 or 0.95?
+                                       momentum=0.0,
                                        eps=0.00001,
                                        centered=True)
 

@@ -7,6 +7,8 @@
 #   https://google.github.io/dopamine/baselines/plots.html
 # - A discussion on (the lack of) frame maxing:
 #   https://github.com/openai/gym/issues/275
+# - The DQN hyper-parameters, as reported by Google Dopamine:
+#   https://github.com/google/dopamine/tree/master/dopamine/agents/dqn/configs
 # Author: Anthony G. Chen
 # =============================================================================
 
@@ -144,6 +146,9 @@ def run_environment(args: argparse.Namespace, device: str = 'cpu',
 
 
 if __name__ == "__main__":
+
+    # TODO: have a hyperparmeter .config file for the future
+    
     # =====================================================
     # Initialize the argument parser
     parser = argparse.ArgumentParser(description='DQN for atari environment')
