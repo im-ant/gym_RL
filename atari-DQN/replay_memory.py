@@ -28,7 +28,11 @@ class CircularReplayBuffer(object):
     frame size and 1mil frames should take around 7.1 GB to store
     """
 
-    def __init__(self, buffer_cap=50000, history=4, obs_shape=(1, 84, 84),
+    def __init__(self, buffer_cap=50000,
+                 history=4,
+                 obs_shape=(1, 84, 84),
+                 obs_dtype=torch.uint8,
+                 seed=0,
                  device='cpu') -> None:
         """
         Initializing the circular replay buffer. For the atari setting, the
@@ -53,7 +57,7 @@ class CircularReplayBuffer(object):
 
         # Initialize the experience shapes and types
         self._obs_shape = obs_shape
-        self._obs_dtype = torch.uint8
+        self._obs_dtype = obs_dtype
         self._act_dtype = torch.int32
         self._rew_dtype = torch.float32
 
@@ -67,6 +71,9 @@ class CircularReplayBuffer(object):
                                        device=self._device)
         self._done_buffer = torch.empty((self.capacity, 1), dtype=torch.bool,
                                         device=self._device)
+
+        # Rng for sampling
+        self.rng = np.random.RandomState(seed=seed)
 
     def push(self, observ: torch.tensor, action: torch.tensor,
              reward: torch.tensor, done: torch.tensor) -> None:
@@ -94,7 +101,7 @@ class CircularReplayBuffer(object):
         # TODO: modify such one cannot sample index i where done[i-1]==True
         #   this is because if i is the last obs of successor state then the
         #   previous state is completely absent
-        indeces = np.random.choice(self.size, size=n, replace=False)
+        indeces = self.rng.choice(self.size, size=n, replace=False)
 
         # Get the buffered experiences
         state_batch, next_state_batch = self.encode_states(indeces)
@@ -112,7 +119,9 @@ class CircularReplayBuffer(object):
         """
 
         # Initialize current and next states tensors (pre zero-padded)
-        _state_tensor_shape = ((len(idxs), self.history) + self._obs_shape[-2:])
+        # State shape: (batch size, channels*history, feature 1, *)
+        _state_tensor_shape = ((len(idxs), self.history * self._obs_shape[0])
+                               + self._obs_shape[1:])
         cur_states = torch.zeros(_state_tensor_shape,
                                  dtype=self._obs_dtype,
                                  device=self._device)
@@ -122,25 +131,31 @@ class CircularReplayBuffer(object):
 
         # Fill each state
         for i, buf_idx in enumerate(idxs):
-            # Get the valid obs sequence of length history + 1
+            # Get the idxs of valid observation sequence of len history + 1
             seq_idxs = self._get_valid_seq((buf_idx + 1) % self.size)
             cur_seq_idxs = seq_idxs[:-1]
             nex_seq_idxs = seq_idxs[1:] if len(seq_idxs) > self.history \
                 else seq_idxs
 
-            # Fill states
+            # Construct state using the observation seq indeces
             # NOTE reshaping stacks multiple channels (if present) AND frames
             #      into the 2nd dimension of the returned state tensor
             if len(cur_seq_idxs) > 0:
-                cur_states[i, -len(cur_seq_idxs):] = torch.reshape(
+                # number of (non zero-padded) observations & channels to stack
+                non_zero_len = len(cur_seq_idxs) * self._obs_shape[0]
+                # note: reshape each state from
+                #       ( len(seq_idxs), channels, feature 1, * )
+                #       to ( len(seq_idxs)*channels, feature 1, * )
+                cur_states[i, -non_zero_len:] = torch.reshape(
                     self._obs_buffer[cur_seq_idxs],
-                    (-1, self._obs_shape[-1], self._obs_shape[-1])
+                    ((non_zero_len,) + self._obs_shape[1:])
                 )
 
             if len(nex_seq_idxs) > 0:
-                nex_states[i, -len(nex_seq_idxs):] = torch.reshape(
+                non_zero_len = len(nex_seq_idxs) * self._obs_shape[0]
+                nex_states[i, -non_zero_len:] = torch.reshape(
                     self._obs_buffer[nex_seq_idxs],
-                    (-1, self._obs_shape[-1], self._obs_shape[-1])
+                    ((non_zero_len,) + self._obs_shape[1:])
                 )
 
         return cur_states, nex_states
