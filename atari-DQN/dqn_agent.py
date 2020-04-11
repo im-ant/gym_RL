@@ -207,8 +207,10 @@ class DQNAgent(object):
             # Construct state
             state = self._history_queue_to_state()
             # greedy action
-            action_tensor = self.policy_net(state).max(1)[1].view(1, 1)
-            return action_tensor.item()  # TODO ensure this works
+            with torch.no_grad():
+                # Get values (1, n_actions), then take max column index
+                action_tensor = self.policy_net(state).max(1)[1].view(1, 1)
+            return action_tensor.item()  
 
     def _train_step(self):
         """Runs a single training step.
@@ -267,31 +269,45 @@ class DQNAgent(object):
 
     def _optimize_model(self) -> float:
         """
-        Optimizes the model for
+        Optimizes the policy (Q) network
         :return:
         """
         # If not enough memory
         if len(self.memory) < self.minibatch_size:
             return -1.0
 
+        # ==
         # Sample memory and unpack
         mem_batch = self.memory.sample(self.minibatch_size)
-        state_batch, action_batch, reward_batch, next_state_batch = mem_batch
+        (state_batch, action_batch, reward_batch,
+         next_state_batch, done_batch) = mem_batch
 
         state_batch = state_batch.type(torch.float32).to(self.device)
         action_batch = action_batch.type(torch.long).to(self.device)
         reward_batch = reward_batch.type(torch.float32).to(self.device)
-        next_state_batch = next_state_batch.type(torch.float).to(self.device)
+        next_state_batch = next_state_batch.type(torch.float32).to(self.device)
+        done_batch = done_batch.type(torch.bool).to(self.device)
 
-        # Compute current and expected values
+        # ==
+        # Compute TD error
+
+        # Get policy net output (batch, n_actions), extract action (index)
+        # which need to have shape (batch, 1) for torch.gather to work.
         state_action_values = self.policy_net(state_batch) \
-            .gather(1, action_batch)  # esti vals for acts taken, size: (batch-size, 1)
-        next_state_values = self.target_net(next_state_batch).max(1)[0].unsqueeze(1).detach()
-        expected_state_action_values = (next_state_values * self.gamma) + reward_batch
+            .gather(1, action_batch)  # (batch-size, 1)
+
+        # Get semi-gradient Q-learning targets (no grad to next state)
+        next_state_values = self.target_net(next_state_batch) \
+            .max(1)[0].unsqueeze(1).detach()  # (batch-size, 1)
+        # Note that if episode is done do not use bootstrap estimate
+        expected_state_action_values = (((next_state_values * (~done_batch))
+                                         * self.gamma)
+                                        + reward_batch)
 
         # Compute TD loss
         loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
 
+        # ==
         # Optimization
         self.optimizer.zero_grad()
         loss.backward()
