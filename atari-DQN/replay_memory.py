@@ -95,7 +95,13 @@ class CircularReplayBuffer(object):
         """
         Sample minibatch experience from the buffer
         :param n: batch size
-        :return: batches of state, action, reward and next state
+        :return: Minibatch memory of the following shape:
+                     state_batch: (batch size, history*channel,
+                                   self.obs_shape[1], self.obs_shape[2], ...)
+                     next_state_batch: same as state_batch
+                     act_batch: (batch size, 1)
+                     rew_batch: (batch size, 1)
+                     don_batch: (batch size, 1)
         """
         # Sample indeces, (inclusive) last indeces of the sequences
         # TODO: modify such one cannot sample index i where done[i-1]==True
@@ -107,8 +113,9 @@ class CircularReplayBuffer(object):
         state_batch, next_state_batch = self.encode_states(indeces)
         act_batch = self._act_buffer[indeces]
         rew_batch = self._rew_buffer[indeces]
+        don_batch = self._done_buffer[indeces]
 
-        return state_batch, act_batch, rew_batch, next_state_batch
+        return state_batch, act_batch, rew_batch, next_state_batch, don_batch
 
     def encode_states(self, idxs: np.ndarray) -> (torch.tensor, torch.tensor):
         """
