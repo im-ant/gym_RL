@@ -159,9 +159,10 @@ if __name__ == "__main__":
                         help='environment to initialize (default: MsPacman-v0)')
     parser.add_argument('--num-episode', type=int, default=500, metavar='N',
                         help='number of episodes to run the environment for (default: 500)')
-    parser.add_argument('--frame-skips', type=int, default=1, metavar='N',
+    parser.add_argument('--frame-skips', type=int, default=4, metavar='N',
                         help="""number of frames to repeat each action for, the agent does
-                                not observe the in-between frames (default: 1)""")
+                                    not observe the in-between frames. Note that if set to 1 the
+                                    AtariPreprocessing max pooling breaks down(default: 4)""")
     # TODO: add a functionality of max-pooling k previous frames?
 
     # Agent parameters
