@@ -62,4 +62,7 @@ class MiniGridImgWrapper(gym.core.Wrapper):
         """
         obs, reward, done, info = self.env.step(action)
         obs = np.moveaxis(obs, 2, 0)
+
+        # maybe TODO: had a note from previous: should I do reward clipping?
+
         return obs, reward, done, info
