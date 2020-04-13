@@ -110,6 +110,8 @@ class DQNAgent(object):
         # Additional attributes?
         memory_buffer_device = self.device  # TODO use this?
 
+        self.rng = np.random.RandomState(seed=self.seed)
+
         # ==
         # Initialize network, memory and optimizer
         self.policy_net = None
@@ -132,23 +134,30 @@ class DQNAgent(object):
 
         # ==
         # Counter variables
-        self.training_steps = 0  # for epsilon decay
-        self.episode_total_policy_loss = 0.0
-        self.episode_total_optim_steps = 0
+        self.total_actions_taken = 0  # for epsilon decay
+        self.total_optim_steps = 0  # for target network updates
+        self._latest_epsilon = 1.0
+        self.per_episode_log = {
+            't': 0,
+            'Q_optim_steps': 0,
+            'total_Q_loss': 0.0,
+        }
 
         self.action = None  # action to be taken (selected at prev timestep)
         self._prev_observation = None
 
     def _init_network(self) -> None:
         """Initialize the Q network"""
-        self.policy_net = network.nature_dqn_network(self.num_actions,
-                                                     self.history_size,
-                                                     self.observation_shape[-2:]
-                                                     ).to(self.device)
-        self.target_net = network.nature_dqn_network(self.num_actions,
-                                                     self.history_size,
-                                                     self.observation_shape[-2:]
-                                                     ).to(self.device)
+        self.policy_net = network.small_q_network(
+            num_actions=self.num_actions,
+            num_channels=(self.history_size * self.observation_shape[0]),
+            input_shape=self.observation_shape[1:]
+        ).to(self.device)
+        self.target_net = network.small_q_network(
+            num_actions=self.num_actions,
+            num_channels=(self.history_size * self.observation_shape[0]),
+            input_shape=self.observation_shape[1:]
+        ).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()  # set target net to evaluation mode
 
@@ -180,14 +189,15 @@ class DQNAgent(object):
 
         # ==
         # Reset per-episode counters
-        # TODO modify these depending on logging
-        self.episode_total_policy_loss = 0.0
-        self.episode_total_optim_steps = 0
+        for k in self.per_episode_log:
+            self.per_episode_log[k] *= 0
 
         # ==
         # Select action update a_0, o_0
         self.action = self._select_action()
         self._prev_observation = observation
+        self.total_actions_taken += 1
+        # TODO potential bug above that might skip some training steps?
         return self.action
 
     def step(self, observation: np.ndarray, reward: float, done: bool) -> int:
@@ -225,6 +235,8 @@ class DQNAgent(object):
         # ==
         # Training step
         self._train_step()
+        self.total_actions_taken += 1
+        self.per_episode_log['t'] += 1
 
         # ==
         # Select action and update a_{t-1}, o_{t-1}
@@ -240,9 +252,11 @@ class DQNAgent(object):
 
         # Compute epsilon
         epsilon = self.epsilon_fn(self.epsilon_decay_period,
-                                  self.training_steps,
+                                  self.total_actions_taken,
                                   self.min_replay_history,
                                   self.epsilon_final)
+        self._latest_epsilon = epsilon
+
         # ===
         # Epsilon greedy policy
         if random.random() <= epsilon:
@@ -279,15 +293,12 @@ class DQNAgent(object):
         # Run a train op at the rate of self.update_period if enough training steps
         # have been run. This matches the Nature DQN behaviour.
         if len(self.memory) > self.min_replay_history:
-            if self.training_steps % self.update_period == 0:
+            if self.total_actions_taken % self.update_period == 0:
                 self._optimize_model()
                 # TODO: Dopamine had a bunch of summary writers here
             # Update target network
-            if self.training_steps % self.target_update_period == 0:
+            if self.total_optim_steps % self.target_update_period == 0:
                 self.target_net.load_state_dict(self.policy_net.state_dict())
-
-        # TODO have better way of updating this index
-        self.training_steps += 1
 
     def _optimize_model(self) -> float:
         """
@@ -339,8 +350,39 @@ class DQNAgent(object):
 
         # Log the loss
         if loss is not None:  # TODO: should never come to this?
-            self.episode_total_policy_loss += loss.item()
-        self.episode_total_optim_steps += 1
+            self.per_episode_log['total_Q_loss'] += loss.item()
+        self.per_episode_log['Q_optim_steps'] += 1
+        self.total_optim_steps += 1
+
+    def report(self, episode_idx, logger=None):
+        if episode_idx == 0:
+            print("\tEpsilon || total_actions || total_optims || avg_Q_loss")
+
+        # ==
+        # Compute the averages
+        avg_Q_loss = 0.0
+        if self.per_episode_log['Q_optim_steps'] > 0:
+            avg_Q_loss = (self.per_episode_log['total_Q_loss'] /
+                          self.per_episode_log['Q_optim_steps'])
+
+        # ==
+        # Print or log
+        if logger is None:
+            print(f"  {self._latest_epsilon} || "
+                  f"{self.total_actions_taken} || "
+                  f"{self.total_optim_steps} || "
+                  f"{avg_Q_loss}")
+        else:
+            logger.add_scalar('Timesteps', self.per_episode_log['t'],
+                              global_step=episode_idx)
+            logger.add_scalar('Eps_exploration', self._latest_epsilon,
+                              global_step=episode_idx)
+            logger.add_scalar('Total_actions', self.total_actions_taken,
+                              global_step=episode_idx)
+            logger.add_scalar('Total_Q_optimizations', self.total_optim_steps,
+                              global_step=episode_idx)
+            logger.add_scalar('Epis_Q_loss', avg_Q_loss,
+                              global_step=episode_idx)
 
 
 if __name__ == "__main__":
