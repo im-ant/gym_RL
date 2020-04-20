@@ -76,6 +76,57 @@ class nature_dqn_network(nn.Module):
         return self.fc2(h)
 
 
+class lscw_q_network(nn.Module):
+    """
+    A smaller version of the convolutional Q network
+
+    Taking mild architecture inspiration from Lucas Willems's github:
+    https://github.com/lcswillems/rl-starter-files/blob/master/model.py
+    """
+
+    def __init__(self, num_actions: int, num_channels: int,
+                 input_shape: Tuple = (7, 7)):
+        """
+        :param num_actions: number of allowable actions
+        :param num_channels: number of input image channels (i.e. number of
+                stacked frames)
+        """
+        super(small_q_network, self).__init__()
+
+        self.num_actions = num_actions
+        self.num_channels = num_channels
+        self.input_shape = input_shape
+
+        # Initialize conv layers
+        self.conv1 = nn.Conv2d(self.num_channels, 16,
+                               kernel_size=(2, 2), stride=1)
+        # TODO add max pooling
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=(2, 2), stride=1)
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=(2, 2), stride=1)
+
+        # Compute num of units: https://pytorch.org/docs/stable/nn.html#conv2d
+        # also github.com/transedward/pytorch-dqn/blob/master/dqn_model.py
+        # NOTE: assume square kernel
+        side_length = compute_output_length(input_length=input_shape[0],
+                                            kernel_size=2,
+                                            stride=1)
+        side_length = compute_output_length(side_length, 2, 1)
+        side_length = compute_output_length(side_length, 2, 1)
+
+        # Initialize fully connected layers; num units computed from:
+        self.fc1 = nn.Linear(64 * side_length * side_length, 64)
+        self.fc2 = nn.Linear(64, self.num_actions)
+
+    def forward(self, x):
+        h = F.relu(self.conv1(x))
+        h = F.relu(self.conv2(h))
+        h = F.relu(self.conv3(h))
+
+        h = h.view(h.shape[0], -1)  # flatten convolution
+        h = F.relu(self.fc1(h))
+        return self.fc2(h)
+
+
 class small_q_network(nn.Module):
     """
     Much smaller version of the convolutional Q network
